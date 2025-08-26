@@ -2,6 +2,7 @@ import os
 import re
 import sys
 from typing import List, Tuple
+from bin_file_processor import process_bin_file
 
 
 START_METHOD_TOKENS = ["Процедура", "Функция"]
@@ -217,45 +218,56 @@ def process_method(lines: List[str], start_idx: int, end_idx: int) -> bool:
 
 
 def process_file(path: str) -> Tuple[bool, int]:
+
+    def _cleanup_returns_in_content(content: str) -> Tuple[str, bool]:
+        # Нормализуем перевод строк к \n, сохраняя потом исходный стиль по первому вхождению
+        newline = '\n'
+        if '\r\n' in content:
+            newline = '\r\n'
+        lines = content.replace('\r\n', '\n').replace('\r', '\n').split('\n')
+
+        methods = find_methods(lines)
+        if not methods:
+            return content, False
+
+        changed = False
+        changes_cnt = 0
+
+        for start_idx, end_idx in reversed(methods):
+            if end_idx >= len(lines):
+                end_idx = len(lines) - 1
+            if start_idx < 0 or end_idx <= start_idx:
+                continue
+            if process_method(lines, start_idx, end_idx):
+                changed = True
+                changes_cnt += 1
+        
+        return newline.join(lines), changed
+
     try:
-        with open(path, 'r', encoding='utf-8', errors='ignore') as f:
-            content = f.read()
-    except Exception:
+        if path.lower().endswith('.bin'):
+            # Only process form binaries
+            if os.path.basename(path).lower() != 'form.bin':
+                return False, 0
+            was_modified, error_message = process_bin_file(path, _cleanup_returns_in_content)
+            if error_message:
+                print(f"!! {path}     {error_message}")
+            return was_modified, (1 if was_modified else 0)
+        else:
+            with open(path, 'r', encoding='utf-8', errors='ignore') as f:
+                content = f.read()
+
+            modified_content, changed = _cleanup_returns_in_content(content)
+
+            if changed:
+                with open(path, 'w', encoding='utf-8') as f:
+                    f.write(modified_content)
+                return True, 1
+            else:
+                return False, 0
+    except Exception as e:
+        # print(f"!!  {path}    Ошибка при обработке файла: {e}") # Temporarily commented out to avoid excessive output
         return False, 0
-
-    # Нормализуем перевод строк к \n, сохраняя потом исходный стиль по первому вхождению
-    newline = '\n'
-    if '\r\n' in content:
-        newline = '\r\n'
-    lines = content.replace('\r\n', '\n').replace('\r', '\n').split('\n')
-
-    methods = find_methods(lines)
-    if not methods:
-        return False, 0
-
-    changed = False
-    changes_cnt = 0
-
-    # Важно: после удаления диапазонов индексы смещаются. Пойдём справа налево либо пересчитаем.
-    # Проще обрабатывать по одному, пересчитывая методы заново после изменения.
-    # Но эффективнее — идти с конца к началу.
-    for start_idx, end_idx in reversed(methods):
-        if end_idx >= len(lines):
-            end_idx = len(lines) - 1
-        if start_idx < 0 or end_idx <= start_idx:
-            continue
-        if process_method(lines, start_idx, end_idx):
-            changed = True
-            changes_cnt += 1
-
-    if changed:
-        new_content = newline.join(lines)
-        try:
-            with open(path, 'w', encoding='utf-8', errors='ignore') as f:
-                f.write(new_content)
-        except Exception:
-            return False, 0
-    return changed, changes_cnt
 
 
 def iter_source_files(root: str):
@@ -282,7 +294,7 @@ def main():
         if changed:
             changed_files += 1
             total_methods_changed += cnt
-            print(f"Changed: {path} (methods cleaned: {cnt})")
+            # print(f"Changed: {path} (methods cleaned: {cnt})")
     print(f"Processed files: {total_files}")
     print(f"Changed files: {changed_files}")
     print(f"Methods cleaned: {total_methods_changed}")

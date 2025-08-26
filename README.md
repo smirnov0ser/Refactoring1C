@@ -18,14 +18,14 @@
 
     **Команда:**
     ```bash
-    python ".\Refactoring1C\delete_metods.py"
+    python "Refactoring1C\delete_metods.py"
     ```
 
 2.  **Подчистка кода после безусловного "Возврат".**
 
     **Команда:**
     ```bash
-    python -X utf8 ".\Refactoring1C\cleanup_return_1c.py" "."
+    python -X utf8 "Refactoring1C\cleanup_return_1c.py" "."
     ```
 
 3.  **Подчистка больших блоков комментариев.**
@@ -33,7 +33,7 @@
 
     **Команда:**
     ```bash
-    python -X utf8 ".\Refactoring1C\find_and_remove_comments.py"
+    python -X utf8 "Refactoring1C\find_and_remove_comments.py"
     ```
 
 4.  **Подчистка больших блоков пустых строк.**
@@ -41,7 +41,7 @@
 
     **Команда:**
     ```bash
-    python -X utf8 ".\Refactoring1C\find_and_remove_empty.py"
+    python -X utf8 "Refactoring1C\find_and_remove_empty.py"
     ```
 
 5.  **Удаление пустых методов.** Не удаляет экспортные.
@@ -50,5 +50,5 @@
 
     **Команда:**
     ```bash
-    python ".\Refactoring1C\delete_empty_metods.py"
+    python "Refactoring1C\delete_empty_metods.py"
     ```

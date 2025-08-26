@@ -14,6 +14,8 @@ import re
 import glob
 import sys
 from pathlib import Path
+from bin_file_processor import process_bin_file
+from typing import Tuple
 
 # Константы
 MIN_COMMENT_BLOCK_LINES = 20 # Минимальное количество содержательных закомментированных строк в блоке для удаления
@@ -97,52 +99,63 @@ def expand_comment_block(lines, start_index, end_index):
 
     return expanded_start, expanded_end
 
-def remove_commented_blocks(file_path):
-    #print(f"Processing file: {file_path}")
-    with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
-        lines = f.readlines()
+def remove_commented_blocks(file_path: str) -> bool:
+    def _remove_comments_from_content(content: str) -> Tuple[str, bool]:
+        lines = content.splitlines(keepends=True)
 
-    new_lines = []
-    i = 0
-    while i < len(lines):
-        line = lines[i]
-        if is_comment(line):
-            # Поиск конца блока комментариев
-            block_start = i
-            block_end = i
-            while block_end + 1 < len(lines) and (is_comment(lines[block_end + 1]) or is_empty_line(lines[block_end + 1])):
-                block_end += 1
+        new_lines = []
+        i = 0
+        changed = False
+        while i < len(lines):
+            line = lines[i]
+            if is_comment(line):
+                block_start = i
+                block_end = i
+                while block_end + 1 < len(lines) and (is_comment(lines[block_end + 1]) or is_empty_line(lines[block_end + 1])):
+                    block_end += 1
 
-            # Проверяем, является ли это комментарием метода
-            is_method_comment = False
-            # Ищем описание метода после блока комментариев (непосредственно после него или через пустые строки)
-            j = block_end + 1
-            while j < len(lines) and is_empty_line(lines[j]):
-                j += 1
-            if j < len(lines) and is_method_declaration(lines[j]):
-                is_method_comment = True
+                is_method_comment = False
+                j = block_end + 1
+                while j < len(lines) and is_empty_line(lines[j]):
+                    j += 1
+                if j < len(lines) and is_method_declaration(lines[j]):
+                    is_method_comment = True
 
-            if not is_method_comment:
-                # Считаем количество содержательных закомментированных строк
-                num_commented_lines = count_commented_lines_in_block(lines, block_start, block_end)
+                if not is_method_comment:
+                    num_commented_lines = count_commented_lines_in_block(lines, block_start, block_end)
 
-                if num_commented_lines > MIN_COMMENT_BLOCK_LINES:
-                    # Расширяем блок для удаления
-                    expanded_start, expanded_end = expand_comment_block(lines, block_start, block_end)
-                    print(f"  Found block to remove from line {expanded_start + 1} to {expanded_end + 1} with {num_commented_lines} commented lines")
-                    i = expanded_end + 1  # Пропускаем удаленный блок
-                    continue
+                    if num_commented_lines > MIN_COMMENT_BLOCK_LINES:
+                        expanded_start, expanded_end = expand_comment_block(lines, block_start, block_end)
+                        print(f"  Found block to remove from line {expanded_start + 1} to {expanded_end + 1} with {num_commented_lines} commented lines")
+                        # Skip the removed block
+                        i = expanded_end + 1  
+                        changed = True
+                        continue
 
-        new_lines.append(line)
-        i += 1
+            new_lines.append(line)
+            i += 1
 
-    # Записываем изменения только если они есть
-    if new_lines != lines:
-        print(f"  Changes detected, writing to file: {file_path}")
-        with open(file_path, 'w', encoding='utf-8') as f:
-            f.writelines(new_lines)
-    #else:
-        #print(f"  No changes detected for file: {file_path}")
+        return "".join(new_lines), changed
+
+    if file_path.lower().endswith('.bin'):
+        # Only process form binaries
+        if os.path.basename(file_path).lower() != 'form.bin':
+            return False
+        was_modified, error_message = process_bin_file(file_path, _remove_comments_from_content)
+        if error_message:
+            print(f"!! {file_path}     {error_message}")
+        return was_modified
+    else:
+        with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
+            content = f.read()
+
+        modified_content, changed = _remove_comments_from_content(content)
+
+        if changed:
+            print(f"  Changes detected, writing to file: {file_path}")
+            with open(file_path, 'w', encoding='utf-8') as f:
+                f.write(modified_content)
+        return changed
 
 if __name__ == "__main__":
     target_path = Path.cwd() # Текущая директория

@@ -184,6 +184,11 @@ class CodeFileFinder:
         if not object_path:
             return []
         
+        # Проверяем, является ли object_path прямым путем к файлу
+        potential_file_path = self.base_path / object_path
+        if potential_file_path.exists() and potential_file_path.is_file():
+            return [str(potential_file_path)]
+
         # Разбиваем путь на объекты
         objects = object_path.split('.')
         if len(objects) < 2:

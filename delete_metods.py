@@ -8,6 +8,8 @@ import re
 import os
 from pathlib import Path
 from find_code_file import CodeFileFinder
+from bin_file_processor import process_bin_file
+from typing import Tuple
 
 
 def parse_methods_file(file_path: str) -> list:
@@ -80,16 +82,14 @@ def remove_method_from_file(file_path: str, method_name: str) -> bool:
     Returns:
         True если метод был удален, False если не найден
     """
-    try:
-        # Читаем файл с игнорированием ошибок кодировки для .bin файлов
-        with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
-            content = f.read()
+
+    def _delete_method_from_content(content: str) -> Tuple[str, bool]:
+        method_found_in_content = False
         
         # Простой и быстрый паттерн для поиска методов
         pattern = rf'(?:Процедура|Функция)\s+{re.escape(method_name)}\s*\([^)]*\).*?(?:КонецПроцедуры|КонецФункции)'
         
         match = re.search(pattern, content, re.DOTALL | re.IGNORECASE)
-        method_found = False
         
         if match:
             # Извлекаем первую строку объявления метода для проверки экспорта
@@ -99,68 +99,74 @@ def remove_method_from_file(file_path: str, method_name: str) -> bool:
             # Проверяем, есть ли слово "Экспорт" в первой строке
             if 'Экспорт' in first_line:
                 print(f"!! {file_path}     Метод '{method_name}' НЕ удален - является экспортным")
+                return content, False
             else:
                 all_lines = content.splitlines(keepends=True)
                 
-                # Find the line index of the method's start
                 char_count = 0
                 method_start_line_idx = -1
                 for idx, line_text in enumerate(all_lines):
-                    if char_count == match.start(): # Exact start of line
+                    if char_count == match.start(): 
                         method_start_line_idx = idx
                         break
-                    if char_count < match.start() < char_count + len(line_text): # Match starts within a line
+                    if char_count < match.start() < char_count + len(line_text):
                         method_start_line_idx = idx
                         break
                     char_count += len(line_text)
                 
-                if method_start_line_idx == -1: # Should not happen if match is found
+                if method_start_line_idx == -1:
                     print(f"Error: Could not find start line for method {method_name}")
-                    return False
+                    return content, False
 
-                # Count comment lines directly above
                 num_comment_lines_to_remove = 0
                 for i in reversed(range(method_start_line_idx)):
                     line = all_lines[i].strip()
                     if line.startswith('//') or line.startswith('&'):
                         num_comment_lines_to_remove += 1
-                    elif line == '': # Empty line, stop deleting comments
+                    elif line == '':
                         break
-                    else: # Non-comment, non-empty line, stop deleting comments
+                    else:
                         break
                 
-                # Calculate the effective start line index for deletion
                 effective_start_line_idx = method_start_line_idx - num_comment_lines_to_remove
                 
-                # The end of the block to remove is the end of the method match.
-                # Find the line index of the method's end (match.end())
                 char_count = 0
                 method_end_line_idx = -1
                 for idx, line_text in enumerate(all_lines):
                     char_count += len(line_text)
-                    if char_count >= match.end(): # Match ends within or at the end of this line
+                    if char_count >= match.end():
                         method_end_line_idx = idx
                         break
                 
-                if method_end_line_idx == -1: # Should not happen if match is found
+                if method_end_line_idx == -1:
                     print(f"Error: Could not find end line for method {method_name}")
-                    return False
+                    return content, False
                 
-                # Reconstruct content, excluding the identified lines
-                # This removes lines from effective_start_line_idx to method_end_line_idx (inclusive)
                 content = "".join(all_lines[:effective_start_line_idx] + all_lines[method_end_line_idx + 1:])
-                
-                method_found = True
-                #print(f"+ {file_path}    Удален метод: {method_name}")
+                method_found_in_content = True
+                # print(f"+ {file_path}    Удален метод: {method_name}")
         
-        if method_found:
-            # Записываем измененный файл
-            with open(file_path, 'w', encoding='utf-8') as f:
-                f.write(content)
-            return True
+        return content, method_found_in_content
+
+    try:
+        if file_path.lower().endswith('.bin'):
+            was_modified, error_message = process_bin_file(file_path, _delete_method_from_content)
+            if error_message:
+                print(f"!! {file_path}     {error_message}")
+            return was_modified
         else:
-            print(f"!! {file_path}     Метод не найден: {method_name}")
-            return False
+            with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
+                content = f.read()
+            
+            modified_content, method_found = _delete_method_from_content(content)
+
+            if method_found:
+                with open(file_path, 'w', encoding='utf-8') as f:
+                    f.write(modified_content)
+                return True
+            else:
+                print(f"!! {file_path}     Метод не найден: {method_name}")
+                return False
             
     except Exception as e:
         print(f"!!  {file_path}    Ошибка при обработке файла: {e}")
@@ -173,7 +179,7 @@ def main():
     finder = CodeFileFinder()
     
     # Парсим файл с методами
-    file_path = "МетодыКУдалению.txt"
+    file_path = ".\Refactoring1C\МетодыКУдалению.txt"
     if not Path(file_path).exists():
         print(f"Файл {file_path} не найден!")
         return

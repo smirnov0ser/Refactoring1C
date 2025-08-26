@@ -8,6 +8,8 @@ import re
 import os
 from pathlib import Path
 from find_code_file import CodeFileFinder
+from bin_file_processor import process_bin_file
+from typing import Tuple
 
 
 def parse_methods_file(file_path: str) -> list:
@@ -80,24 +82,21 @@ def remove_method_from_file(file_path: str, method_name: str) -> bool:
     Returns:
         True если метод был удален, False если не найден или не пуст
     """
-    try:
-        with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
-            content = f.read()
+
+    def _delete_empty_method_from_content(content: str) -> Tuple[str, bool]:
+        method_found_in_content = False
 
         # Regex to find the method block, including optional 'Экспорт' keyword
         pattern = rf'(?:Процедура|Функция)\s+{re.escape(method_name)}\s*\([^)]*\).*?(?:КонецПроцедуры|КонецФункции)'
         
         # We need to search with DOTALL to match newlines within the method body
         match = re.search(pattern, content, re.DOTALL | re.IGNORECASE)
-        method_found = False
 
         if match:
             # Extract the method text to check for emptiness
             method_text_full = match.group(0)
             
             # Extract the body for emptiness check (excluding the declaration and end lines)
-            # This is a bit more involved as we need to find the actual body. A simpler regex might be better for this initial check.
-            # For now, let's re-use the original body extraction but without named groups
             body_pattern = rf'(?:Процедура|Функция)\s+{re.escape(method_name)}\s*\([^)]*\)(?:Экспорт)?\s*(.*?)(?:КонецПроцедуры|КонецФункции)'
             body_match = re.search(body_pattern, method_text_full, re.DOTALL | re.IGNORECASE)
             method_body = body_match.group(1) if body_match else ""
@@ -112,6 +111,7 @@ def remove_method_from_file(file_path: str, method_name: str) -> bool:
                 # Проверяем, есть ли слово "Экспорт" в первой строке
                 if 'Экспорт' in first_line:
                     print(f"!! {file_path}     Метод '{method_name}' НЕ удален - является экспортным")
+                    return content, False
                 else:
                     all_lines = content.splitlines(keepends=True)
                     
@@ -129,7 +129,7 @@ def remove_method_from_file(file_path: str, method_name: str) -> bool:
                     
                     if method_start_line_idx == -1: # Should not happen if match is found
                         print(f"Error: Could not find start line for method {method_name}")
-                        return False
+                        return content, False
 
                     # Count comment lines directly above
                     num_comment_lines_to_remove = 0
@@ -157,24 +157,37 @@ def remove_method_from_file(file_path: str, method_name: str) -> bool:
                     
                     if method_end_line_idx == -1: # Should not happen if match is found
                         print(f"Error: Could not find end line for method {method_name}")
-                        return False
+                        return content, False
                     
                     # Reconstruct content, excluding the identified lines
                     # This removes lines from effective_start_line_idx to method_end_line_idx (inclusive)
                     content = "".join(all_lines[:effective_start_line_idx] + all_lines[method_end_line_idx + 1:])
                     
-                    method_found = True
-                    # print(f"+ {file_path}    Удален пустой метод: {method_name}")
+                    method_found_in_content = True
+                    print(f"+ {file_path}    Удален пустой метод: {method_name}")
             else:
                 print(f"!! {file_path}     Метод '{method_name}' НЕ удален - не является пустым")
+        return content, method_found_in_content
 
-        if method_found:
-            with open(file_path, 'w', encoding='utf-8') as f:
-                f.write(content)
-            return True
+    try:
+        if file_path.lower().endswith('.bin'):
+            was_modified, error_message = process_bin_file(file_path, _delete_empty_method_from_content)
+            if error_message:
+                print(f"!! {file_path}     {error_message}")
+            return was_modified
         else:
-            print(f"!! {file_path}     Метод не найден: {method_name}")
-            return False
+            with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
+                content = f.read()
+            
+            modified_content, method_found = _delete_empty_method_from_content(content)
+
+            if method_found:
+                with open(file_path, 'w', encoding='utf-8') as f:
+                    f.write(modified_content)
+                return True
+            else:
+                print(f"!! {file_path}     Метод не найден: {method_name}")
+                return False
             
     except Exception as e:
         print(f"!!  {file_path}    Ошибка при обработке файла: {e}")
