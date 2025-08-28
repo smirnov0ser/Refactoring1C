@@ -4,7 +4,7 @@
 Скрипт для поиска и удаления закомментированных блоков кода в проекте 1С
 Правила удаления:
 1. НЕ удаляет комментарии методов (блоки перед Процедура/Функция)
-2. Ищет блоки из более чем 9 строк закомментированного кода (не включая пустые строки между ними)
+2. Ищет блоки из более чем Х строк закомментированного кода (включая пустые строки между ними)
 3. Расширяет блок кода вверх и вниз, добавляя пустые строки и строки комментариев, пока не встретит код или описание метода. 
 Не добавляет в блок первую пустую строку полученного блока. если такой нет - последнюю пустую строку. 
 """
@@ -36,19 +36,22 @@ def is_empty_line(line):
     return bool(EMPTY_LINE_REGEX.match(line))
 
 def is_method_declaration(line):
-    """Проверяет, является ли строка объявлением Процедуры или Функции."""
-    return bool(METHOD_DECLARATION_REGEX.match(line))
+    """Проверяет, является ли строка объявлением Процедуры или Функции.
+    Игнорирует строки-комментарии (//...).
+    """
+    l = line.lstrip()
+    # Не считать комментарии объявлениями методов
+    if l.startswith('//'):
+        return False
+    return bool(METHOD_DECLARATION_REGEX.match(l))
 
 def count_commented_lines_in_block(lines, start_index, end_index):
     """
-    Считает количество закомментированных строк в заданном блоке,
-    исключая пустые строки.
+    Считает количество строк в заданном блоке, включая пустые строки между комментариями.
     """
-    count = 0
-    for i in range(start_index, end_index + 1):
-        if is_comment(lines[i]) and not is_empty_line(lines[i]):
-            count += 1
-    return count
+    # В блок уже входят только строки, удовлетворяющие is_comment или is_empty_line,
+    # поэтому считаем все строки блока целиком.
+    return end_index - start_index + 1
 
 def expand_comment_block(lines, start_index, end_index):
     """
@@ -114,17 +117,27 @@ def remove_commented_blocks(file_path: str) -> bool:
                 while block_end + 1 < len(lines) and (is_comment(lines[block_end + 1]) or is_empty_line(lines[block_end + 1])):
                     block_end += 1
 
+                # Проверяем, является ли это комментарием метода
                 is_method_comment = False
-                j = block_end + 1
-                while j < len(lines) and is_empty_line(lines[j]):
-                    j += 1
-                if j < len(lines) and is_method_declaration(lines[j]):
-                    is_method_comment = True
+                # Блок не может быть шапкой метода, если его последняя строка пустая
+                if not is_empty_line(lines[block_end]):
+                    j = block_end + 1
+                    if j < len(lines):
+                        lj = lines[j].lstrip()
+                        if is_method_declaration(lines[j]):
+                            is_method_comment = True
+                        elif lj.startswith('&'):
+                            # Допускаем один или несколько атрибутов перед объявлением метода
+                            k = j
+                            while k < len(lines) and lines[k].lstrip().startswith('&'):
+                                k += 1
+                            if k < len(lines) and is_method_declaration(lines[k]):
+                                is_method_comment = True
 
                 if not is_method_comment:
                     num_commented_lines = count_commented_lines_in_block(lines, block_start, block_end)
 
-                    if num_commented_lines > MIN_COMMENT_BLOCK_LINES:
+                    if num_commented_lines >= MIN_COMMENT_BLOCK_LINES:
                         expanded_start, expanded_end = expand_comment_block(lines, block_start, block_end)
                         print(f"  Found block to remove from line {expanded_start + 1} to {expanded_end + 1} with {num_commented_lines} commented lines")
                         # Skip the removed block
@@ -163,8 +176,6 @@ if __name__ == "__main__":
     for file_path in glob.glob(str(target_path / "**/*.bin"), recursive=True):
         remove_commented_blocks(file_path)
     for file_path in glob.glob(str(target_path / "**/*.bsl"), recursive=True):
-        remove_commented_blocks(file_path)
-    for file_path in glob.glob(str(target_path / "**/*.prc"), recursive=True):
         remove_commented_blocks(file_path)
     for file_path in glob.glob(str(target_path / "**/*.os"), recursive=True):
         remove_commented_blocks(file_path)
