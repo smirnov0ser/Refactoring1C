@@ -28,9 +28,9 @@ NEST_DEC_TOKENS = [
 FILE_EXTENSIONS = {".os", ".bsl", ".bin"}
 
 # Предкомпилированные паттерны (ускорение)
-_START_RE = re.compile(r"^\s*(?:" + "|".join(map(re.escape, START_METHOD_TOKENS)) + r")\b")
-_END_RE = re.compile(r"^\s*(?:" + "|".join(map(re.escape, END_METHOD_TOKENS)) + r")\b")
-_RETURN_ONLY_RE = re.compile(r"^\s*Возврат\s*;\s*$")
+_START_RE = re.compile(r"^\s*(?:" + "|".join(map(re.escape, START_METHOD_TOKENS)) + r")\b", re.IGNORECASE)
+_END_RE = re.compile(r"^\s*(?:" + "|".join(map(re.escape, END_METHOD_TOKENS)) + r")\b", re.IGNORECASE)
+_RETURN_STMT_RE = re.compile(r"^\s*Возврат(?:\s+[^;]+)?\s*;\s*$", re.IGNORECASE)
 _NEST_DEC_RE = re.compile(r"(^|\s)(?:" + "|".join(map(re.escape, NEST_DEC_TOKENS)) + r")(\s|$)")
 _NEST_INC_RE = re.compile(r"(^|\s)(?:" + "|".join(map(re.escape, NEST_INC_TOKENS)) + r")(\s|$)")
 _NEST_DEC_START_RE = re.compile(r"^\s*(?:" + "|".join(map(re.escape, NEST_DEC_TOKENS)) + r")\b", re.IGNORECASE)
@@ -145,8 +145,7 @@ def should_ignore_return(line: str, nesting: int, lines: List[str] = None, curre
     no_strings = remove_string_literals(before_comment)
     # Запрещаем случаи вроде Object.Возврат
     # Должно начинаться с Возврат и заканчиваться ; (с пробелами)
-    pattern = r"^\s*Возврат\s*;\s*$"
-    if not re.match(pattern, no_strings):
+    if not _RETURN_STMT_RE.match(no_strings):
         return True
     
     # Дополнительная проверка: Возврат должен быть на корневом уровне метода
@@ -207,9 +206,21 @@ def process_method(lines: List[str], start_idx: int, end_idx: int) -> bool:
     if delete_from > delete_to:
         return False
 
-    # Проверяем наличие хотя бы одной непустой строки
-    has_non_empty = any(lines[k].strip() != "" for k in range(delete_from, delete_to + 1))
-    if not has_non_empty:
+    # Проверяем содержимое блока: если есть непустая НЕ комментарий — удаляем как раньше.
+    # Иначе считаем непустые комментарии; если их > 3 — удаляем, иначе не трогаем.
+    has_non_comment_non_empty = False
+    non_empty_comment_count = 0
+    for k in range(delete_from, delete_to + 1):
+        raw_line = lines[k]
+        if raw_line.strip() == "":
+            continue
+        if is_comment_line(raw_line):
+            non_empty_comment_count += 1
+        else:
+            has_non_comment_non_empty = True
+            break
+
+    if not has_non_comment_non_empty and non_empty_comment_count <= 3:
         return False
 
     # Удаляем строки
@@ -246,13 +257,18 @@ def process_file(path: str) -> Tuple[bool, int]:
 
     try:
         if path.lower().endswith('.bin'):
-            # Only process form binaries
+            # Only process form binaries; harden against read/codec errors
             if os.path.basename(path).lower() != 'form.bin':
                 return False, 0
-            was_modified, error_message = process_bin_file(path, _cleanup_returns_in_content)
-            if error_message:
-                print(f"!! {path}     {error_message}")
-            return was_modified, (1 if was_modified else 0)
+            try:
+                was_modified, error_message = process_bin_file(path, _cleanup_returns_in_content)
+                if error_message:
+                    print(f"!! {path}     {error_message}")
+                return was_modified, (1 if was_modified else 0)
+            except Exception as e:
+                # Skip problematic binaries silently to allow processing to continue
+                # print(f"!!  {path}    Ошибка обработки BIN: {e}")
+                return False, 0
         else:
             with open(path, 'r', encoding='utf-8', errors='ignore') as f:
                 content = f.read()
